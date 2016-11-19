@@ -1,0 +1,172 @@
+---
+title: "Report - Project Machine Learning - Predict Types of Exercises"
+author: "Leonardo Alves"
+date: "November 18, 2016"
+output: html_document
+---
+
+## Introduction
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project was to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants (Velloso et all, 2013) and predict the manner in which they did the exercise using machine learning approach. The "classe" variable in the training set has the information about the manner. 
+
+The main questions and points of this report:
+
+1. How the model was built?
+2. How cross validation was used?
+3. Discuss about sample error and the choices made
+4. Use the prediction model to predict 20 different test cases
+
+## Data Preparation
+
+The data was donwloaded and two datasets were assigned (training and testing).
+
+```{r}
+# Downloading datasets
+fileUrl1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileUrl1,destfile="training.csv",method="curl")
+fileUrl2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileUrl2,destfile="testing.csv",method="curl")
+
+#Training data
+training <- read.csv("training.csv")
+#Testing data
+testing <- read.csv("testing.csv")
+```
+
+There are many models where predictors with a single unique value (also know as "zero-variance predictor") will cause the model to fail. To prevent this problem, the function nearZeroVar from caret package was used to exclude these predictors.
+
+```{r}
+# Package Caret
+library(caret)
+# Deleting near zero-variance predictors:
+# 1 - the percentage of unique values is less than 20% and
+# 2 - the ratio of the most frequent to the second most frequent value is greater than 20
+training <- training[, -nearZeroVar(training)]
+dim(training)
+testing <- testing[, -nearZeroVar(testing)]
+dim(testing)
+```
+
+The columns with NAs in the training set were deleted and the first variable (X) of each dataset was exclude because they are just a sequence of numbers.
+
+```{r}
+training <- training[ , colSums(is.na(training)) == 0]
+training$X <- NULL
+testing$X <- NULL
+dim(training)
+dim(testing)
+
+#variables in the new training set
+str(training)
+```
+
+We reduced the number of variables in the datasets from 160 to 58 following the steps above.
+
+## Building and Tuning Models
+
+Our response variable "classe" has five levels (A, B, C, D and E). The response is a factor variable. We decided to build and tuning two different types of model: Random Forest and Support Vector Machine (SVM). These models are powerful and very flexible for situations like that, where we have predict the correct classe (five possible classes). 
+
+The Repeated K-fold CV was used as resampling method (10 fold, repeated 3 times). This method is robust and almost unbiased. For example, the default method (Bootstrapping) has low variance but non-zero bias when compared to K-fold CV. 
+
+Once the final set of predictors was determined, the values required transformations before being used in the models. Some models, such as partial least squares, neural networks and support vector machines, need the predictor variables to be centered and/or scaled (Kuhn, 2008). For this reason, in this project the training datasets where centered and scaled (preProc = c("center", "scale")).
+
+It was not possible to measure error (RMSE) considering the classification models (RF and SVM) because the response is a factor variable. The error can be measured as percentage of correct predictions. The accuracy and Kappa were considered the perfomance measures to help choose the best model.
+
+The Tunelength = 5 was choosed for both models. The methods in the train function were "RF" to Random Forest and "SvmRadial" to Support Vector Machine. 
+
+Most of these parameters were choosed following the suggestions finding in the article: "Kuhn, M. Building Predictive Models Using the caret Package. Journal of Statistical Software. Vol. 28, Issue 5, 2008".
+
+Parallel processing was used to make computations faster (libraries foreach and doMC).
+
+### Random Forest Model
+
+```{r, echo = FALSE}
+# random forest
+
+library(randomForest)
+
+# libraries for Parallel processing
+
+library(foreach)
+library(doMC)
+registerDoMC(cores = 8) 
+
+set.seed(123)
+
+inTrain = createDataPartition(training$classe, p = 3/4)[[1]]
+train = training[ inTrain,]
+test = training[-inTrain,]
+
+cvCtrl <- trainControl(method = "repeatedcv", repeats = 3)
+FitRf <- train(classe ~., data = train, method = "rf", tuneLength = 5, trControl = cvCtrl, preProc = c("center", "scale"))
+FitRf
+plot(FitRf)
+RF_pred <- predict(FitRf, test)
+confusionMatrix(RF_pred, test$classe)
+```
+
+### Prediction of 20 different test cases using Random Forest
+
+```{r, echo = FALSE}
+predTestingRf<- predict(FitRf, testing)
+FitRf$finalModel
+predTestingRf
+```
+
+## Support Vector Machines (SVM)
+
+```{r, echo = FALSE}
+# SVM
+
+library(kernlab)
+
+# libraries for parallel processing
+
+library(foreach)
+library(doMC)
+registerDoMC(cores = 8) # cores of computer that will be used
+
+set.seed(123)
+
+inTrain = createDataPartition(training$classe, p = 3/4)[[1]]
+train2 = training[ inTrain,]
+test2 = training[-inTrain,]
+
+cvCtrl2 <- trainControl(method = "repeatedcv", repeats = 3)
+FitSvm <- train(classe ~., data = train2, method = "svmRadial", tuneLength = 5, trControl = cvCtrl2, preProc = c("center", "scale"))
+FitSvm
+plot(FitSvm)
+SVM_pred <- predict(FitSvm, test2)
+confusionMatrix(SVM_pred, test2$classe)
+```
+
+### Prediction of 20 different test cases using Random Forest
+
+```{r, echo = FALSE}
+predTestingSvm<- predict(FitSvm, testing)
+FitSvm$finalModel
+predTestingSvm
+```
+
+## Results
+
+The final model using Random Forest was selected (better measures performances in the test set: Accuracy = 0.99  Kappa = 0.99 vs Accuracy = 0.96  Kappa = 0.95 of SVM).
+
+The predictions of 20 different test cases were similar for both models:
+
+* Random Forest
+
+B A B A A E D B A A B C B A E E A B B B
+Levels: A B C D E
+
+* SVM
+
+B A B A A E D B A A B C B A E E A B B B
+Levels: A B C D E
+
+## References
+
+- Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4QOQgEFuQ
+
+- Kuhn, M. Building Predictive Models Using the caret Package. Journal of Statistical Software. Vol. 28, Issue 5, 2008.
